@@ -1,0 +1,52 @@
+name: fork-ci
+
+# CI rieng cua fork vanbienperu3107/cliproxy_mod.
+#
+# Vi sao can them: pr-test-build.yml cua upstream CHI chay `go build`, khong chay
+# `go test`. Fork nay sua vao duong capture request/response (tran bo nho) va them
+# logger ghi Postgres, tuc dung cho de mot loi im lang tro thanh OOM tren prod —
+# build xanh khong chung minh duoc gi ve nhung thay doi do.
+#
+# Chay tren push cua moi nhanh lam viec, khong doi PR, vi chinh sach cua repo la
+# 100% build/test tren GitHub Actions, khong build cuc bo.
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build + test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet cac goi da sua
+        run: go vet ./internal/config/... ./internal/logging/... ./internal/api/... ./internal/runtime/executor/helps/...
+
+      # Chay rieng cac goi fork nay dung toi truoc: neu chung do thi biet ngay la
+      # loi cua minh, khong lan trong ket qua cua toan bo repo.
+      - name: Test cac goi da sua
+        run: go test ./internal/config/... ./internal/logging/... ./internal/api/middleware/... -count=1
+
+      # Sau do chay toan bo de bat hoi quy o noi khac: tran capture nam tren duong
+      # di cua moi request, nen anh huong co the o rat xa cho vua sua.
+      - name: Test toan bo
+        run: go test ./... -count=1
