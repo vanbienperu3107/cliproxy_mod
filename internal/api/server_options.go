@@ -11,6 +11,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	log "github.com/sirupsen/logrus"
 )
 
 type serverOptionConfig struct {
@@ -33,6 +34,24 @@ type serverOptionConfig struct {
 type ServerOption func(*serverOptionConfig)
 
 func defaultRequestLoggerFactory(cfg *config.Config, configPath string) logging.RequestLogger {
+	// Fork-local: chat history takes precedence when configured. This is the only
+	// production wiring point — WithRequestLoggerFactory exists upstream but no call
+	// site uses it, so overriding the default here avoids touching cmd/server/main.go.
+	if cfg != nil && cfg.ChatHistory.Active() {
+		pgLogger, err := logging.NewPostgresRequestLogger(
+			context.Background(),
+			cfg.ChatHistory.DSN,
+			cfg.ChatHistory.EffectiveMaxCaptureBytes(),
+			cfg.ChatHistory.EffectiveQueueSize(),
+			cfg.ChatHistory.EffectivePaths(),
+		)
+		if err == nil {
+			return pgLogger
+		}
+		// Never fail startup over history capture: fall through to the file logger.
+		log.WithError(err).Error("chat-history: disabled, falling back to file request logger")
+	}
+
 	configDir := filepath.Dir(configPath)
 	logsDir := logging.ResolveLogDirectory(cfg)
 	logger := logging.NewFileRequestLogger(cfg.RequestLog, logsDir, configDir, cfg.ErrorLogsMaxFiles)
