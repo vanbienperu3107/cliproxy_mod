@@ -1,0 +1,82 @@
+name: fork-image
+
+# Build anh Docker cua FORK nay va day len GHCR.
+#
+# Vi sao can: tu khi fork sua vao duong capture request/response, anh
+# `eceasy/cli-proxy-api` cua upstream khong con dung duoc nua. Workflow
+# docker-image.yml cua upstream day len Docker Hub bang secret cua ho, khong
+# chay duoc o day.
+#
+# Dat ten `fork-image.yml` (khong sua docker-image.yml) de merge upstream khong
+# bao gio cham vao file nay.
+#
+# Tag: <ref>-<sha ngan>, vi du feat-chat-history-postgres-272c4b2. Khong dung
+# `latest` lam tag deploy: deploy-cliproxy.yml o repo deployHeadscale so tag
+# dang chay tren may voi tag muon deploy, nen tag phai chi vao dung mot ban build.
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+  workflow_dispatch:
+    inputs:
+      tag_suffix:
+        description: "Hau to them vao tag (tuy chon)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: fork-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build va day len GHCR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Tinh tag
+        id: meta
+        run: |
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          REF_SLUG=$(echo "${GITHUB_REF_NAME}" | tr '/' '-' | tr -cd '[:alnum:]._-')
+          TAG="${REF_SLUG}-${SHORT_SHA}${{ github.event.inputs.tag_suffix }}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER}/cliproxy_mod:${TAG}" | tr '[:upper:]' '[:lower:]' >> "$GITHUB_OUTPUT"
+          echo "Tag: ${TAG}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Dang nhap GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Chi amd64: vpn4 la amd64, va build CGO cho arm64 phai cross-compile -
+      # tra gia thoi gian build cho mot kien truc khong ai dung.
+      - name: Build va day
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.tag }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: In ra anh da day
+        run: echo "${{ steps.meta.outputs.image }}"
