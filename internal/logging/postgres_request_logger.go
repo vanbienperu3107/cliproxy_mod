@@ -210,15 +210,15 @@ func (l *PostgresRequestLogger) write(turn *ChatTurn) error {
 	// here: bodies are truncated at the capture cap and may carry invalid UTF-8.
 	var sessionID int64
 	err := l.pool.QueryRow(ctx, `
-		INSERT INTO chat_sessions (session_key, first_seen_at, last_seen_at, turn_count, client_ua, models)
+		INSERT INTO chat_history.chat_sessions (session_key, first_seen_at, last_seen_at, turn_count, client_ua, models)
 		VALUES ($1, $2, $2, 1, $3, CASE WHEN $4 = '' THEN '{}'::text[] ELSE ARRAY[$4] END)
 		ON CONFLICT (session_key) DO UPDATE SET
 			last_seen_at = EXCLUDED.last_seen_at,
-			turn_count   = chat_sessions.turn_count + 1,
-			client_ua    = COALESCE(NULLIF(EXCLUDED.client_ua, ''), chat_sessions.client_ua),
+			turn_count   = chat_history.chat_sessions.turn_count + 1,
+			client_ua    = COALESCE(NULLIF(EXCLUDED.client_ua, ''), chat_history.chat_sessions.client_ua),
 			models       = CASE
-				WHEN $4 = '' OR $4 = ANY(chat_sessions.models) THEN chat_sessions.models
-				ELSE array_append(chat_sessions.models, $4)
+				WHEN $4 = '' OR $4 = ANY(chat_history.chat_sessions.models) THEN chat_history.chat_sessions.models
+				ELSE array_append(chat_history.chat_sessions.models, $4)
 			END
 		RETURNING id`,
 		turn.SessionKey, turn.CreatedAt, sanitize(turn.UserAgent), sanitize(turn.Model),
@@ -234,7 +234,7 @@ func (l *PostgresRequestLogger) write(turn *ChatTurn) error {
 	}
 
 	_, err = l.pool.Exec(ctx, `
-		INSERT INTO chat_turns (
+		INSERT INTO chat_history.chat_turns (
 			session_id, request_id, created_at, model, uri, status_code, streaming,
 			duration_ms, ttfb_ms, request_body, request_json, response_text, error_text, truncated
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
