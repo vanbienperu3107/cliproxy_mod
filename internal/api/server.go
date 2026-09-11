@@ -145,7 +145,10 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// Resolve logs directory relative to the configuration file directory.
 	var requestLogger logging.RequestLogger
 	var toggle func(bool)
-	if !cfg.CommercialMode {
+	// Fork-local: chat-history capture must survive commercial-mode, which upstream
+	// uses to switch the whole request-logging middleware off. See
+	// internal/config/chat_history.go for why this is a separate flag.
+	if !cfg.CommercialMode || cfg.ChatHistory.Active() {
 		if optionState.requestLoggerFactory != nil {
 			requestLogger = optionState.requestLoggerFactory(cfg, configFilePath)
 		}
@@ -389,6 +392,14 @@ func (s *Server) Stop(ctx context.Context) error {
 	errShutdown := s.server.Shutdown(ctx)
 	if s.codexLiveHandler != nil {
 		s.codexLiveHandler.Close()
+	}
+	// Fork-local: drain the chat-history queue and release its connection pool.
+	// The RequestLogger interface has no Close, so this is opt-in by type assertion,
+	// mirroring how SetEnabled is picked up in NewServer.
+	if closer, ok := s.requestLogger.(interface{ Close() error }); ok && closer != nil {
+		if errClose := closer.Close(); errClose != nil {
+			log.WithError(errClose).Warn("failed to close request logger")
+		}
 	}
 	if errShutdown != nil {
 		return fmt.Errorf("failed to shutdown HTTP server: %v", errShutdown)

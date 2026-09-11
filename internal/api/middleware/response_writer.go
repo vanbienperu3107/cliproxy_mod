@@ -28,6 +28,7 @@ type RequestInfo struct {
 	Method              string                      // Method is the HTTP method (e.g., GET or POST).
 	Headers             map[string][]string         // Headers contains the request headers.
 	Body                []byte                      // Body is the raw request body.
+	BodyTruncated       bool                        // BodyTruncated reports that Body was cut at the logger's capture cap.
 	RequestID           string                      // RequestID is the unique identifier for the request.
 	Timestamp           time.Time                   // Timestamp is when the request was received.
 	deferredBodyCapture *deferredRequestBodyCapture // deferredBodyCapture spools large error-only request bodies.
@@ -48,6 +49,8 @@ type ResponseWriterWrapper struct {
 	headers             map[string][]string        // headers stores the response headers.
 	logOnErrorOnly      bool                       // logOnErrorOnly enables logging only when an error response is detected.
 	firstChunkTimestamp time.Time                  // firstChunkTimestamp captures TTFB for streaming responses.
+	maxBodyBytes        int64                      // maxBodyBytes caps the buffered non-streaming response body; 0 means unlimited.
+	bodyTruncated       bool                       // bodyTruncated reports that the buffered body hit maxBodyBytes.
 }
 
 // NewResponseWriterWrapper creates and initializes a new ResponseWriterWrapper.
@@ -98,10 +101,33 @@ func (w *ResponseWriterWrapper) Write(data []byte) (int, error) {
 	}
 
 	if w.shouldBufferResponseBody() {
-		w.body.Write(data)
+		w.appendBufferedBody(data)
 	}
 
 	return n, err
+}
+
+// appendBufferedBody buffers response bytes for logging, stopping at maxBodyBytes.
+//
+// Without this cap a large non-streaming response is accumulated in full, which is the
+// mirror image of the unbounded request capture: both together are what made a 1 GiB
+// container reachable by a single oversized exchange.
+func (w *ResponseWriterWrapper) appendBufferedBody(data []byte) {
+	if w.maxBodyBytes <= 0 {
+		w.body.Write(data)
+		return
+	}
+	remaining := w.maxBodyBytes - int64(w.body.Len())
+	if remaining <= 0 {
+		w.bodyTruncated = true
+		return
+	}
+	if int64(len(data)) > remaining {
+		w.body.Write(data[:remaining])
+		w.bodyTruncated = true
+		return
+	}
+	w.body.Write(data)
 }
 
 func (w *ResponseWriterWrapper) shouldBufferResponseBody() bool {
@@ -145,7 +171,7 @@ func (w *ResponseWriterWrapper) WriteString(data string) (int, error) {
 	}
 
 	if w.shouldBufferResponseBody() {
-		w.body.WriteString(data)
+		w.appendBufferedBody([]byte(data))
 	}
 	return n, err
 }

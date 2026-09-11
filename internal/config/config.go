@@ -171,4 +171,8 @@ type Config struct {
 
 	// Payload defines default and override rules for provider payload parameters.
 	Payload PayloadConfig `yaml:"payload" json:"payload"`
+
+	// ChatHistory configures fork-local chat-history capture into PostgreSQL.
+	// See internal/config/chat_history.go.
+	ChatHistory ChatHistoryConfig `yaml:"chat-history" json:"chat-history"`
 }

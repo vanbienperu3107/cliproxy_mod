@@ -45,12 +45,20 @@ func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		// Fork-local: a logger may narrow the set of paths it wants. Upstream's
+		// shouldLogRequest only excludes management routes, so without this every POST
+		// on the server would be persisted along with its headers.
+		if selector, ok := logger.(pathSelector); ok && selector != nil && !selector.ShouldCapturePath(path) {
+			c.Next()
+			return
+		}
 
 		loggerEnabled := logger.IsEnabled()
+		captureLimit := captureLimitFor(logger)
 		captureBody := shouldCaptureRequestBody(loggerEnabled, c.Request)
 
 		// Capture request information
-		requestInfo, err := captureRequestInfo(c, captureBody)
+		requestInfo, err := captureRequestInfo(c, captureBody, captureLimit)
 		if err != nil {
 			// Log error but continue processing
 			// In a real implementation, you might want to use a proper logger here
@@ -60,6 +68,7 @@ func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 
 		// Create response writer wrapper
 		wrapper := NewResponseWriterWrapper(c.Writer, logger, requestInfo)
+		wrapper.maxBodyBytes = captureLimit
 		if !loggerEnabled {
 			wrapper.logOnErrorOnly = true
 		}
@@ -288,6 +297,34 @@ func isResponsesWebsocketUpgrade(req *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(req.Header.Get("Upgrade")), "websocket")
 }
 
+// captureLimiter lets a RequestLogger impose a hard cap on how much of a body the
+// middleware is allowed to hold in memory.
+//
+// Upstream has no such cap on the enabled path: shouldCaptureRequestBody returns true
+// unconditionally and captureRequestInfo does an unbounded io.ReadAll. The 1 MiB /
+// 32 MiB constants above and the disk-spooling capture only apply when the logger is
+// disabled (see attachDeferredRequestBodyCapture, which returns early on loggerEnabled).
+// A 57 MB request body once OOM-killed this container, so a logger that stays enabled
+// must bring its own limit.
+type captureLimiter interface {
+	MaxCaptureBytes() int64
+}
+
+// pathSelector lets a RequestLogger restrict which request paths it captures.
+type pathSelector interface {
+	ShouldCapturePath(path string) bool
+}
+
+// captureLimitFor returns the cap a logger imposes, or 0 when it imposes none.
+func captureLimitFor(logger logging.RequestLogger) int64 {
+	if limiter, ok := logger.(captureLimiter); ok && limiter != nil {
+		if limit := limiter.MaxCaptureBytes(); limit > 0 {
+			return limit
+		}
+	}
+	return 0
+}
+
 func shouldCaptureRequestBody(loggerEnabled bool, req *http.Request) bool {
 	if loggerEnabled {
 		return true
@@ -308,7 +345,7 @@ func shouldCaptureRequestBody(loggerEnabled bool, req *http.Request) bool {
 // captureRequestInfo extracts relevant information from the incoming HTTP request.
 // It captures the URL, method, headers, and body. The request body is read and then
 // restored so that it can be processed by subsequent handlers.
-func captureRequestInfo(c *gin.Context, captureBody bool) (*RequestInfo, error) {
+func captureRequestInfo(c *gin.Context, captureBody bool, captureLimit int64) (*RequestInfo, error) {
 	// Capture URL with sensitive query parameters masked
 	maskedQuery := util.MaskSensitiveQuery(c.Request.URL.RawQuery)
 	url := c.Request.URL.Path
@@ -329,26 +366,62 @@ func captureRequestInfo(c *gin.Context, captureBody bool) (*RequestInfo, error) 
 
 	// Capture request body
 	var body []byte
+	truncated := false
 	if captureBody && c.Request.Body != nil {
-		// Read the body
-		bodyBytes, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			return nil, err
+		if captureLimit <= 0 {
+			// Upstream behaviour: read everything.
+			bodyBytes, err := io.ReadAll(c.Request.Body)
+			if err != nil {
+				return nil, err
+			}
+			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			body = decodeCapturedRequestBodyForLog(bodyBytes, c.Request.Header.Get("Content-Encoding"))
+		} else {
+			// Capped path: read at most captureLimit+1 bytes for the log and splice the
+			// untouched remainder back in front of the real body. The oversized tail is
+			// never materialised, so a 57 MB request costs us captureLimit, not 57 MB.
+			head, err := io.ReadAll(io.LimitReader(c.Request.Body, captureLimit+1))
+			if err != nil {
+				return nil, err
+			}
+			rest := c.Request.Body
+			c.Request.Body = &spliceReadCloser{
+				Reader: io.MultiReader(bytes.NewReader(head), rest),
+				closer: rest,
+			}
+			if int64(len(head)) > captureLimit {
+				body = head[:captureLimit]
+				truncated = true
+			} else {
+				body = decodeCapturedRequestBodyForLog(head, c.Request.Header.Get("Content-Encoding"))
+			}
 		}
-
-		// Restore the body for the actual request processing
-		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-		body = decodeCapturedRequestBodyForLog(bodyBytes, c.Request.Header.Get("Content-Encoding"))
 	}
 
 	return &RequestInfo{
-		URL:       url,
-		Method:    method,
-		Headers:   headers,
-		Body:      body,
-		RequestID: logging.GetGinRequestID(c),
-		Timestamp: time.Now(),
+		URL:            url,
+		Method:         method,
+		Headers:        headers,
+		Body:           body,
+		BodyTruncated:  truncated,
+		RequestID:      logging.GetGinRequestID(c),
+		Timestamp:      time.Now(),
 	}, nil
+}
+
+// spliceReadCloser rejoins an already-read prefix with the untouched rest of a body
+// while keeping the original Closer, so capping the captured prefix never changes what
+// the downstream handler receives.
+type spliceReadCloser struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (s *spliceReadCloser) Close() error {
+	if s.closer == nil {
+		return nil
+	}
+	return s.closer.Close()
 }
 
 func decodeCapturedRequestBodyForLog(raw []byte, encoding string) []byte {
