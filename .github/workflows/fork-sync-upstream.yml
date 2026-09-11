@@ -75,8 +75,13 @@ jobs:
 
       # Push bang GITHUB_TOKEN KHONG kich hoat workflow khac (GitHub chan de tranh
       # vong lap), nen fork-image se khong tu build. workflow_dispatch thi duoc phep.
-      - name: Kich build anh cho main moi
+      # Kich CA fork-ci: autoupdate-cliproxy.yml (repo deployHeadscale) chi deploy sha
+      # co ca fork-image LAN fork-ci xanh. Thieu dong fork-ci thi sha vua dong bo khong
+      # bao gio du dieu kien va vpn4 dung nang cap ma khong ai bao.
+      - name: Kich build anh + CI cho main moi
         if: steps.merge.outputs.behind != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run fork-image.yml --repo "$GITHUB_REPOSITORY" --ref main
+        run: |
+          gh workflow run fork-image.yml --repo "$GITHUB_REPOSITORY" --ref main
+          gh workflow run fork-ci.yml --repo "$GITHUB_REPOSITORY" --ref main
