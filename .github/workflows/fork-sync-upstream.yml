@@ -1,0 +1,82 @@
+name: fork-sync-upstream
+
+# Keo code moi cua upstream (router-for-me/CLIProxyAPI) vao main cua fork, hang tuan.
+#
+# Vi sao can: truoc day vpn4 chay thang anh eceasy/cli-proxy-api cua upstream nen
+# autoupdate-cliproxy.yml chi can so tag Docker Hub. Tu 2026-09-10 vpn4 chay anh
+# build tu FORK (tinh nang lich su chat), nen ban moi cua upstream chi toi duoc may
+# that neu fork merge no vao truoc. Khong co workflow nay thi fork dong bang mai o
+# ban upstream luc tach nhanh - dung loai loi ma autoupdate sinh ra de chong
+# (su co 03/09: proxy qua cu, Anthropic tu choi model moi).
+#
+# Cong gate: chi day len main khi merge SACH va build + toan bo test XANH. Xung dot
+# hoac test do -> run do, main giu nguyen, anh dang chay khong bi dong toi. Run do
+# chinh la tin hieu can nguoi vao merge tay.
+#
+# Chay Chu nhat 07:00 UTC, truoc autoupdate-cliproxy.yml (10:00 UTC, repo
+# deployHeadscale) du lau de fork-image build xong.
+on:
+  schedule:
+    - cron: "0 7 * * 0"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: fork-sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge upstream, test, day len main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main cua fork (du lich su de merge)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Merge upstream/main
+        id: merge
+        run: |
+          git config user.name "fork-sync-upstream"
+          git config user.email "actions@users.noreply.github.com"
+          git remote add upstream https://github.com/router-for-me/CLIProxyAPI.git
+          git fetch --no-tags upstream main
+          BEHIND=$(git rev-list --count HEAD..upstream/main)
+          echo "Upstream co $BEHIND commit moi"
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          test "$BEHIND" -gt 0 || exit 0
+          # Xung dot -> merge that bai -> step do -> KHONG day gi len main.
+          git merge --no-edit upstream/main
+
+      - name: Set up Go
+        if: steps.merge.outputs.behind != '0'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Cung bo kiem voi fork-ci.yml: goi rieng phan fork sua truoc de biet ngay neu
+      # upstream vua lam gay tinh nang lich su chat, roi toan bo de bat hoi quy khac.
+      - name: Build + test sau khi merge
+        if: steps.merge.outputs.behind != '0'
+        run: |
+          go build ./...
+          go test ./internal/config/... ./internal/logging/... ./internal/api/middleware/... -count=1
+          go test ./... -count=1
+
+      - name: Day len main
+        if: steps.merge.outputs.behind != '0'
+        run: git push origin HEAD:main
+
+      # Push bang GITHUB_TOKEN KHONG kich hoat workflow khac (GitHub chan de tranh
+      # vong lap), nen fork-image se khong tu build. workflow_dispatch thi duoc phep.
+      - name: Kich build anh cho main moi
+        if: steps.merge.outputs.behind != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run fork-image.yml --repo "$GITHUB_REPOSITORY" --ref main
