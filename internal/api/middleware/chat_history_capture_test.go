@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
 )
 
 // cappingLogger is a RequestLogger that advertises a capture cap and a path allowlist.
@@ -27,8 +27,8 @@ func (l *cappingLogger) LogStreamingRequest(url, method string, headers map[stri
 	return nil, nil
 }
 
-func (l *cappingLogger) IsEnabled() bool          { return true }
-func (l *cappingLogger) MaxCaptureBytes() int64   { return l.limit }
+func (l *cappingLogger) IsEnabled() bool        { return true }
+func (l *cappingLogger) MaxCaptureBytes() int64 { return l.limit }
 func (l *cappingLogger) ShouldCapturePath(p string) bool {
 	if l.paths == nil {
 		return true

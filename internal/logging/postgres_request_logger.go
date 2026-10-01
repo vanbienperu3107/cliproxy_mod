@@ -34,7 +34,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -338,7 +338,7 @@ func (w *postgresStreamWriter) WriteStatus(status int, headers map[string][]stri
 	return nil
 }
 
-func (w *postgresStreamWriter) WriteAPIRequest(apiRequest []byte) error  { return nil }
+func (w *postgresStreamWriter) WriteAPIRequest(apiRequest []byte) error   { return nil }
 func (w *postgresStreamWriter) WriteAPIResponse(apiResponse []byte) error { return nil }
 func (w *postgresStreamWriter) WriteAPIWebsocketTimeline(timeline []byte) error {
 	return nil
