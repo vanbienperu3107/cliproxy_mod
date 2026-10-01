@@ -1399,6 +1399,7 @@ func TestKimiExecutor_WarnsWhenUpstreamServesUnexpectedModel(t *testing.T) {
 		Provider:   "kimi",
 		Attributes: map[string]string{},
 		Metadata:   map[string]any{"access_token": "test-key"},
+		ID:         t.TempDir(),
 	}
 
 	ctx = coreusage.WithRequestedModelAlias(ctx, alias)

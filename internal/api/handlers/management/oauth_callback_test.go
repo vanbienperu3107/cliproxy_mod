@@ -52,7 +52,7 @@ func TestPostOAuthCallbackCreatesMissingAuthDir(t *testing.T) {
 
 func TestGetOAuthCallbackWritesPluginProviderCallback(t *testing.T) {
 	authDir := filepath.Join(t.TempDir(), "missing-auth")
-	state := "test-geminicli-state"
+	state := "test-geminicli-" + filepath.Base(filepath.Dir(filepath.Dir(authDir)))
 	if errRegister := RegisterPluginOAuthSession(state, "gemini-cli", nil); errRegister != nil {
 		t.Fatalf("register plugin oauth session: %v", errRegister)
 	}
@@ -88,7 +88,7 @@ func TestGetOAuthCallbackWritesPluginProviderCallback(t *testing.T) {
 
 func TestGetOAuthCallbackDoesNotAliasPluginProvider(t *testing.T) {
 	authDir := filepath.Join(t.TempDir(), "missing-auth")
-	state := "test-openai-plugin-state"
+	state := "test-openai-plugin-" + filepath.Base(filepath.Dir(filepath.Dir(authDir)))
 	if errRegister := RegisterPluginOAuthSession(state, "openai", nil); errRegister != nil {
 		t.Fatalf("register plugin oauth session: %v", errRegister)
 	}

@@ -508,10 +508,15 @@ func TestHandlerPluginExecutorPublishesStreamCancellation(t *testing.T) {
 	handler.SetModelRouterHost(mockHost)
 
 	dataChan, _, _ := handler.ExecuteStreamWithAuthManager(ctx, "openai", originalModel, []byte(fmt.Sprintf(`{"model":%q,"stream":true}`, originalModel)), "")
-	// Receive first chunk then cancel context
+	// Receive first chunk, then cancel the context. The channel is deliberately
+	// left open: closing it here would make both arms of the consumer's
+	// `select { case <-ctx.Done(); case chunk, ok = <-chunks }` ready at once,
+	// and Go picks a ready arm at random, so the stream would be recorded as a
+	// clean end-of-stream instead of a cancellation about half the time. Only
+	// cancellation must end this stream, so cancellation is the only signal.
 	<-dataChan
 	cancel()
-	close(chunks)
+	t.Cleanup(func() { close(chunks) })
 
 	record := plugin.waitRecord(t)
 	if record.Provider != targetPluginID {

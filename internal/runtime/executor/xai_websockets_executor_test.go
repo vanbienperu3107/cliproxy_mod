@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -322,6 +323,9 @@ func TestXAIWebsocketsExecuteStreamSendsResponseCreateWithPreviousResponseID(t *
 	ctx := cliproxyexecutor.WithUpstreamAttemptTracker(
 		cliproxyexecutor.WithDownstreamWebsocket(context.Background()),
 	)
+	exec.store = &codexWebsocketSessionStore{sessions: make(map[string]*codexWebsocketSession)}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	result, err := exec.ExecuteStream(ctx, auth, req, opts)
 	if err != nil {
@@ -2191,8 +2195,13 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 	inWriteHook := make(chan struct{})
 	pongDeliveredDuringWrite := make(chan struct{})
 
+	// The write hook fires once per writeMessage and the server handler runs once
+	// per connection, so a reconnect or write retry reaches these closes a second
+	// time. Closing an already-closed channel panics, so both are closed once.
+	var inWriteHookOnce, pongDeliveredOnce sync.Once
+
 	testWebsocketWritePayloadHook = func(conn *websocket.Conn) {
-		close(inWriteHook)
+		inWriteHookOnce.Do(func() { close(inWriteHook) })
 		select {
 		case <-pongDeliveredDuringWrite:
 		case <-time.After(2 * time.Second):
@@ -2214,11 +2223,18 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 			return nil
 		})
 
+		// payloadRead reports that the client's payload write completed and the
+		// server has consumed it. Replying and returning before that point closes
+		// the connection underneath the write the hook is still holding, which
+		// surfaces as "use of closed network connection".
+		payloadRead := make(chan struct{})
+		var payloadReadOnce sync.Once
 		go func() {
 			for {
 				if _, _, errReadLoop := conn.ReadMessage(); errReadLoop != nil {
 					return
 				}
+				payloadReadOnce.Do(func() { close(payloadRead) })
 			}
 		}()
 
@@ -2236,9 +2252,18 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 			if got != "xai-session-ping" {
 				t.Errorf("unexpected pong payload: got %q, want xai-session-ping", got)
 			}
-			close(pongDeliveredDuringWrite)
+			pongDeliveredOnce.Do(func() { close(pongDeliveredDuringWrite) })
 		case <-time.After(2 * time.Second):
 			t.Errorf("pong was not received while payload write was in progress")
+			return
+		}
+
+		// The hook released the client write once the pong arrived; wait for that
+		// payload before replying so the deferred Close cannot race it.
+		select {
+		case <-payloadRead:
+		case <-time.After(2 * time.Second):
+			t.Errorf("timed out waiting for client payload after pong delivery")
 			return
 		}
 
@@ -2287,8 +2312,12 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
 	inWriteHook := make(chan struct{})
 	pongDeliveredDuringWrite := make(chan struct{})
 
+	// See the WithSession variant: the hook and the server handler can both run
+	// more than once, so these channels are closed at most once.
+	var inWriteHookOnce, pongDeliveredOnce sync.Once
+
 	testWebsocketWritePayloadHook = func(conn *websocket.Conn) {
-		close(inWriteHook)
+		inWriteHookOnce.Do(func() { close(inWriteHook) })
 		select {
 		case <-pongDeliveredDuringWrite:
 		case <-time.After(2 * time.Second):
@@ -2310,11 +2339,18 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
 			return nil
 		})
 
+		// payloadRead reports that the client's payload write completed and the
+		// server has consumed it. Replying and returning before that point closes
+		// the connection underneath the write the hook is still holding, which
+		// surfaces as "use of closed network connection".
+		payloadRead := make(chan struct{})
+		var payloadReadOnce sync.Once
 		go func() {
 			for {
 				if _, _, errReadLoop := conn.ReadMessage(); errReadLoop != nil {
 					return
 				}
+				payloadReadOnce.Do(func() { close(payloadRead) })
 			}
 		}()
 
@@ -2332,9 +2368,18 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
 			if got != "xai-sessionless-ping" {
 				t.Errorf("unexpected pong payload: got %q, want xai-sessionless-ping", got)
 			}
-			close(pongDeliveredDuringWrite)
+			pongDeliveredOnce.Do(func() { close(pongDeliveredDuringWrite) })
 		case <-time.After(2 * time.Second):
 			t.Errorf("pong was not received while payload write was in progress on sessionless connection")
+			return
+		}
+
+		// The hook released the client write once the pong arrived; wait for that
+		// payload before replying so the deferred Close cannot race it.
+		select {
+		case <-payloadRead:
+		case <-time.After(2 * time.Second):
+			t.Errorf("timed out waiting for client payload after pong delivery")
 			return
 		}
 

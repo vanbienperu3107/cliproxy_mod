@@ -3800,7 +3800,7 @@ func TestDevinExecutor_WarnsWhenUpstreamServesUnexpectedModel(t *testing.T) {
 
 	exec := NewDevinExecutor(&config.Config{})
 	auth := &cliproxyauth.Auth{
-		ID:         "devin-auth-unexpected",
+		ID:         t.TempDir(),
 		Provider:   "devin",
 		Attributes: map[string]string{"api_key": "test-key"},
 	}

@@ -129,6 +129,30 @@ func TestClearRetryActiveStateClearsOriginalConnection(t *testing.T) {
 	}
 }
 
+// drainRetryBindChunks consumes a stream result and returns the first chunk
+// error. The wait is bounded because the test's websocket server branches on a
+// connection counter: if the expected connection never happens the chunk channel
+// is never closed, and an unbounded `range` would hang until the whole package
+// hits the 10-minute test timeout, reporting an unrelated panic instead of this
+// test's own failure.
+func drainRetryBindChunks(chunks <-chan cliproxyexecutor.StreamChunk) error {
+	const drainTimeout = 30 * time.Second
+	timeout := time.After(drainTimeout)
+	for {
+		select {
+		case chunk, ok := <-chunks:
+			if !ok {
+				return nil
+			}
+			if chunk.Err != nil {
+				return chunk.Err
+			}
+		case <-timeout:
+			return fmt.Errorf("timed out after %s waiting for the stream to close", drainTimeout)
+		}
+	}
+}
+
 func TestWebsocketRetryBindFailureClearsActiveSessionState(t *testing.T) {
 	tests := []struct {
 		name string
@@ -154,7 +178,9 @@ func TestWebsocketRetryBindFailureClearsActiveSessionState(t *testing.T) {
 						}
 						primed = true
 					}
-					_, errExecute := executor.Execute(context.Background(), auth, req, runOpts)
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					_, errExecute := executor.Execute(ctx, auth, req, runOpts)
 					return errExecute
 				}, executor.getOrCreateSession("retry-bind")
 			},
@@ -179,16 +205,13 @@ func TestWebsocketRetryBindFailureClearsActiveSessionState(t *testing.T) {
 						}
 						primed = true
 					}
-					result, errExecute := executor.ExecuteStream(context.Background(), auth, req, runOpts)
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					result, errExecute := executor.ExecuteStream(ctx, auth, req, runOpts)
 					if errExecute != nil {
 						return errExecute
 					}
-					for chunk := range result.Chunks {
-						if chunk.Err != nil {
-							return chunk.Err
-						}
-					}
-					return nil
+					return drainRetryBindChunks(result.Chunks)
 				}, executor.getOrCreateSession("retry-bind")
 			},
 		},
@@ -212,16 +235,13 @@ func TestWebsocketRetryBindFailureClearsActiveSessionState(t *testing.T) {
 						}
 						primed = true
 					}
-					result, errExecute := executor.ExecuteStream(context.Background(), auth, req, runOpts)
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					result, errExecute := executor.ExecuteStream(ctx, auth, req, runOpts)
 					if errExecute != nil {
 						return errExecute
 					}
-					for chunk := range result.Chunks {
-						if chunk.Err != nil {
-							return chunk.Err
-						}
-					}
-					return nil
+					return drainRetryBindChunks(result.Chunks)
 				}, executor.getOrCreateSession("retry-bind")
 			},
 		},
@@ -232,18 +252,19 @@ func TestWebsocketRetryBindFailureClearsActiveSessionState(t *testing.T) {
 			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 			var connections atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Assign the ordinal before Upgrade publishes the handshake. Otherwise
+				// the client can dial its retry before this handler increments it.
+				connection := connections.Add(1)
 				conn, errUpgrade := upgrader.Upgrade(w, r, nil)
 				if errUpgrade != nil {
 					t.Errorf("upgrade websocket: %v", errUpgrade)
 					return
 				}
-				connection := connections.Add(1)
 				defer func() { _ = conn.Close() }()
-				if connection == 1 {
+				if connection <= 2 {
+					// Let the client close the rejected resource; an immediate server
+					// close races the lifecycle bind and tests EOF instead of rejection.
 					_, _, _ = conn.ReadMessage()
-					return
-				}
-				if connection == 2 {
 					return
 				}
 				if _, _, errRead := conn.ReadMessage(); errRead != nil {
@@ -259,8 +280,8 @@ func TestWebsocketRetryBindFailureClearsActiveSessionState(t *testing.T) {
 			lifecycle := &rejectSecondBindLifecycle{}
 			opts := cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse, ResponseFormat: sdktranslator.FormatOpenAIResponse, ExecutionLifecycle: lifecycle, Metadata: map[string]any{cliproxyexecutor.ExecutionSessionMetadataKey: "retry-bind"}}
 			run, sess := test.run(t, server.URL)
-			if errRun := run(opts); errRun == nil {
-				t.Fatal("first request error = nil, want retry lifecycle bind rejection")
+			if errRun := run(opts); errRun == nil || !strings.Contains(errRun.Error(), "retry lifecycle bind rejected") {
+				t.Fatalf("first request error = %v, want retry lifecycle bind rejection", errRun)
 			}
 			if got := lifecycle.binds.Load(); got != 2 {
 				t.Fatalf("lifecycle binds = %d, want 2", got)
@@ -270,6 +291,10 @@ func TestWebsocketRetryBindFailureClearsActiveSessionState(t *testing.T) {
 			sess.activeMu.Unlock()
 			if active {
 				t.Fatal("retry bind failure left the old active websocket state")
+			}
+
+			if got := connections.Load(); got != 2 {
+				t.Fatalf("retry connections = %d, want 2", got)
 			}
 
 			opts.ExecutionLifecycle = nil

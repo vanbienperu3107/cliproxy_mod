@@ -1007,6 +1007,7 @@ func TestMetaExecutor_ExecuteNonStreamMultiEventSSE_RecordsModelAndWarnsOnSubsti
 	}
 
 	ctx := coreusage.WithRequestedModelAlias(context.Background(), alias)
+	auth.ID = t.TempDir()
 	resp, err := exec.Execute(ctx, auth, cliproxyexecutor.Request{
 		Model:   "muse-spark-1.3",
 		Payload: []byte(`{"model":"muse-spark-1.3","messages":[{"role":"user","content":"hello"}]}`),

@@ -297,6 +297,7 @@ func TestServePluginAuthURLPassesQueryParamsAsMetadata(t *testing.T) {
 	host := pluginhost.New()
 	var capturedReq pluginapi.AuthLoginStartRequest
 	callCount := 0
+	statePrefix := fmt.Sprintf("state-%d", time.Now().UnixNano())
 	provider := &testAuthProvider{
 		identifier: "custom-sso",
 		startLogin: func(ctx context.Context, req pluginapi.AuthLoginStartRequest) (pluginapi.AuthLoginStartResponse, error) {
@@ -305,7 +306,7 @@ func TestServePluginAuthURLPassesQueryParamsAsMetadata(t *testing.T) {
 			return pluginapi.AuthLoginStartResponse{
 				Provider:  req.Provider,
 				URL:       "https://login.example.com",
-				State:     fmt.Sprintf("state-1234567890-%d", callCount),
+				State:     fmt.Sprintf("%s-%d", statePrefix, callCount),
 				ExpiresAt: time.Now().Add(time.Hour),
 			}, nil
 		},

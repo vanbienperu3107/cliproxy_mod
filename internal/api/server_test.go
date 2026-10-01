@@ -1602,7 +1602,7 @@ func TestOAuthCallbackRouteSkipsManagementKeyMiddleware(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "test-management-key")
 
 	server := newTestServer(t)
-	state := "server-plugin-oauth-state"
+	state := "server-plugin-oauth-" + filepath.Base(filepath.Dir(t.TempDir()))
 	if errRegister := managementHandlers.RegisterPluginOAuthSession(state, "gemini-cli", nil); errRegister != nil {
 		t.Fatalf("register plugin oauth session: %v", errRegister)
 	}

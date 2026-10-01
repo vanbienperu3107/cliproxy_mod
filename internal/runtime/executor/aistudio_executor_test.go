@@ -233,7 +233,7 @@ func TestAIStudioExecutorWithoutRelaySessionDoesNotMarkUpstreamAttempt(t *testin
 }
 
 func TestAIStudioExecutorExecuteStartsTTFTBeforeRelayWait(t *testing.T) {
-	const authID = "aistudio-ttft-auth"
+	authID := fmt.Sprintf("aistudio-ttft-auth-%d", time.Now().UnixNano())
 	delay := 40 * time.Millisecond
 	connected := make(chan struct{})
 	var connectedOnce sync.Once
@@ -302,7 +302,8 @@ func TestAIStudioExecutorExecuteStartsTTFTBeforeRelayWait(t *testing.T) {
 	}()
 
 	plugin := &captureAIStudioUsagePlugin{records: make(chan usage.Record, 16)}
-	usage.RegisterPlugin(plugin)
+	usage.RegisterNamedPlugin(t.Name(), plugin)
+	t.Cleanup(func() { usage.RegisterNamedPlugin(t.Name(), multiProviderNoopUsagePlugin{}) })
 	exec := NewAIStudioExecutor(&config.Config{}, "aistudio", relay)
 	ctx := cliproxyexecutor.WithUpstreamAttemptTracker(context.Background())
 	_, errExecute := exec.Execute(ctx, &cliproxyauth.Auth{ID: authID, Provider: "aistudio"}, cliproxyexecutor.Request{
@@ -319,7 +320,11 @@ func TestAIStudioExecutorExecuteStartsTTFTBeforeRelayWait(t *testing.T) {
 		t.Fatal(errClient)
 	}
 
-	record := waitForAIStudioUsageRecord(t, plugin.records, "gemini-3.1-pro-preview")
+	// Match identity, never the measured value: a zero TTFT for this request
+	// must still reach the assertion and fail.
+	record := waitForAIStudioUsageRecordMatching(t, plugin.records, "gemini-3.1-pro-preview", func(candidate usage.Record) bool {
+		return candidate.AuthID == authID
+	})
 	if record.TTFT < delay {
 		t.Fatalf("ttft = %v, want >= %v", record.TTFT, delay)
 	}
@@ -341,13 +346,29 @@ func (p *captureAIStudioUsagePlugin) HandleUsage(_ context.Context, record usage
 
 func waitForAIStudioUsageRecord(t *testing.T, records <-chan usage.Record, model string) usage.Record {
 	t.Helper()
+	return waitForAIStudioUsageRecordMatching(t, records, model, nil)
+}
+
+// waitForAIStudioUsageRecordMatching returns the first aistudio record for model
+// that also satisfies match. The extra predicate exists because usage plugins are
+// registered on the process-wide default manager and are never unregistered, so a
+// plugin created by one test also receives records published by sibling tests
+// that use the same provider and model. Matching on provider and model alone let
+// an unrelated record satisfy the wait and produced assertions against the wrong
+// record (for example a TTFT of 0 from a request that never reached upstream).
+func waitForAIStudioUsageRecordMatching(t *testing.T, records <-chan usage.Record, model string, match func(usage.Record) bool) usage.Record {
+	t.Helper()
 	timeout := time.After(2 * time.Second)
 	for {
 		select {
 		case record := <-records:
-			if record.Provider == "aistudio" && record.Model == model {
-				return record
+			if record.Provider != "aistudio" || record.Model != model {
+				continue
 			}
+			if match != nil && !match(record) {
+				continue
+			}
+			return record
 		case <-timeout:
 			t.Fatalf("timed out waiting for AI Studio usage record")
 		}
