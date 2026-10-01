@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
@@ -483,28 +484,34 @@ func TestNewLifetimePreservesClusterFailoverState(t *testing.T) {
 
 func TestEnsureClientsWaitsForPreviousTargetClose(t *testing.T) {
 	client := New(config.HomeConfig{Enabled: true, Host: "next.example.com", Port: 8327})
-	closing := make(chan struct{})
-	client.closing = closing
-	done := make(chan error, 1)
-	go func() {
-		done <- client.ensureClients()
-	}()
-
-	select {
-	case errEnsure := <-done:
-		t.Fatalf("ensureClients() returned before previous target closed: %v", errEnsure)
-	case <-time.After(20 * time.Millisecond):
+	// Construct pools outside the bubble: this test verifies close ordering,
+	// not Redis initialization or network scheduling.
+	if err := client.ensureClients(); err != nil {
+		t.Fatal(err)
 	}
-	close(closing)
-	select {
-	case errEnsure := <-done:
-		if errEnsure != nil {
-			t.Fatal(errEnsure)
+	t.Cleanup(client.Close)
+	synctest.Test(t, func(t *testing.T) {
+		closing := make(chan struct{})
+		client.closing = closing
+		done := make(chan error, 1)
+		go func() { done <- client.ensureClients() }()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			t.Fatalf("ensureClients returned before close: %v", err)
+		default:
 		}
-	case <-time.After(time.Second):
-		t.Fatal("ensureClients() did not continue after previous target closed")
-	}
-	client.Close()
+		close(closing)
+		synctest.Wait()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		default:
+			t.Fatal("ensureClients did not resume after close")
+		}
+	})
 }
 
 func TestConcurrencyReleaseDoesNotOpenBeforeMembershipReady(t *testing.T) {

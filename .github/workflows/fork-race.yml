@@ -1,0 +1,20 @@
+name: fork-race
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Race-check concurrency regressions
+        env:
+          CGO_ENABLED: "1"
+        run: >-
+          go test -race -count=10 -timeout=10m
+          -run 'TestEnsureClientsWaitsForPreviousTargetClose|TestAntigravityConcurrentRequests|TestAIStudioExecutorExecuteStartsTTFTBeforeRelayWait|TestWebsocketRetryBindFailureClearsActiveSessionState|Test.*KeepalivePingDuringUpload|TestHandlerPluginExecutorPublishesStreamCancellation'
+          ./internal/home ./internal/runtime/executor ./sdk/api/handlers
