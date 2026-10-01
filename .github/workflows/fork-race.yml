@@ -1,5 +1,7 @@
 name: fork-race
 on:
+  push:
+    branches: ["fix/upstream-test-bugs"]
   workflow_dispatch:
 permissions:
   contents: read
