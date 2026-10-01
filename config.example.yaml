@@ -999,8 +999,8 @@ oauth:
       # enabled, OS/arch are pinned to the values below and cached profiles remain constrained to
       # the same exact software baseline rather than learning newer client versions.
       # header-defaults:
-      #   user-agent: "claude-cli/2.1.280 (external, cli)"
-      #   package-version: "0.112.1"
+      #   user-agent: "claude-cli/2.1.286 (external, cli)"
+      #   package-version: "0.127.0"
       #   runtime-version: "v26.3.0"
       #   os: "MacOS"
       #   arch: "arm64"
