@@ -84,7 +84,7 @@ func TestDetectClaudeCodeRequestRequiresAllFourMessageSignals(t *testing.T) {
 
 func TestDetectClaudeCodeRequestAcceptsNewerPatchInMeasuredReleaseLine(t *testing.T) {
 	headers := confirmedClaudeCodeHeaders()
-	headers.Set("User-Agent", "claude-cli/2.1.281 (external, cli)")
+	headers.Set("User-Agent", "claude-cli/2.1.287 (external, cli)")
 	payload := claudeCodeDetectionPayload(validClaudeCodeMetadataUserID)
 
 	detection := DetectClaudeCodeRequest(headers, payload, false)

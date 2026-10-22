@@ -1830,7 +1830,19 @@ func corruptGitRepository(t *testing.T, repoDir string) {
 			t.Fatalf("remove packfile %s: %v", filepath.Base(packfile), errRemove)
 		}
 	}
-	if errVerify := verifyRepositoryHead(repo); !isRepositoryCorruptionError(errVerify) {
+	// Verify through a fresh handle: the handle opened above resolved head objects
+	// into memory before the corruption was applied, so it can still answer reads
+	// that no longer have any on-disk backing.
+	freshRepo, errReopen := git.PlainOpen(repoDir)
+	if errReopen != nil {
+		t.Fatalf("reopen corrupted repository: %v", errReopen)
+	}
+	defer func() {
+		if errClose := freshRepo.Close(); errClose != nil {
+			t.Errorf("close reopened corrupted repository: %v", errClose)
+		}
+	}()
+	if errVerify := verifyRepositoryHead(freshRepo); !isRepositoryCorruptionError(errVerify) {
 		t.Fatalf("verifyRepositoryHead error = %v, want repository corruption", errVerify)
 	}
 }

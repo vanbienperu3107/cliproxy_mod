@@ -1552,7 +1552,13 @@ func rollbackRecoveredGitDirectory(gitDir, backupGitDir string) error {
 }
 
 func isRepositoryCorruptionError(err error) bool {
-	return errors.Is(err, dotgit.ErrPackfileNotFound) || errors.Is(err, plumbing.ErrObjectNotFound)
+	if errors.Is(err, dotgit.ErrPackfileNotFound) || errors.Is(err, plumbing.ErrObjectNotFound) {
+		return true
+	}
+	// go-git v6 surfaces a missing packfile as a wrapped *fs.PathError
+	// ("packhandle: … stat at objects/pack/… no such file or directory")
+	// instead of dotgit.ErrPackfileNotFound.
+	return errors.Is(err, os.ErrNotExist) && strings.Contains(err.Error(), "objects/pack")
 }
 
 func verifyRepositoryHead(repo *git.Repository) error {

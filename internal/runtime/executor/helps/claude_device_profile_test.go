@@ -363,7 +363,7 @@ func TestResolveClaudeDeviceProfilePreservesConfirmedClientAtBaselineVersion(t *
 	useFakeClaudeDeviceProfileKVClient(t, client, false, nil)
 	auth := &cliproxyauth.Auth{ID: "auth-baseline-entrypoint"}
 	headers := claudeDeviceHeaders("claude-cli/2.1.286 (external, cli)")
-	headers.Set("X-Stainless-Package-Version", "0.112.1")
+	headers.Set("X-Stainless-Package-Version", "0.127.0")
 	headers.Set("X-Stainless-Runtime-Version", "v26.3.0")
 
 	profile, errProfile := ResolveClaudeDeviceProfileRequired(context.Background(), auth, "api-key", headers, nil)
@@ -373,8 +373,8 @@ func TestResolveClaudeDeviceProfilePreservesConfirmedClientAtBaselineVersion(t *
 	if profile.UserAgent != "claude-cli/2.1.286 (external, cli)" {
 		t.Fatalf("UserAgent = %q, want confirmed cli entrypoint preserved", profile.UserAgent)
 	}
-	if profile.PackageVersion != "0.112.1" || profile.RuntimeVersion != "v26.3.0" {
-		t.Fatalf("software profile = %s/%s, want 0.112.1/v26.3.0", profile.PackageVersion, profile.RuntimeVersion)
+	if profile.PackageVersion != "0.127.0" || profile.RuntimeVersion != "v26.3.0" {
+		t.Fatalf("software profile = %s/%s, want 0.127.0/v26.3.0", profile.PackageVersion, profile.RuntimeVersion)
 	}
 }
 
@@ -385,7 +385,7 @@ func TestResolveClaudeDeviceProfileSeparatesVSCodeAgentSDKFromCLI(t *testing.T) 
 	auth := &cliproxyauth.Auth{ID: "auth-subclient-isolation"}
 
 	cliHeaders := claudeDeviceHeaders("claude-cli/2.1.286 (external, cli)")
-	cliHeaders.Set("X-Stainless-Package-Version", "0.112.1")
+	cliHeaders.Set("X-Stainless-Package-Version", "0.127.0")
 	cliHeaders.Set("X-Stainless-Runtime-Version", "v26.3.0")
 	cliProfile, errCLI := ResolveClaudeDeviceProfileRequired(context.Background(), auth, "api-key", cliHeaders, nil)
 	if errCLI != nil {
@@ -394,7 +394,7 @@ func TestResolveClaudeDeviceProfileSeparatesVSCodeAgentSDKFromCLI(t *testing.T) 
 
 	vscodeUA := "claude-cli/2.1.286 (external, claude-vscode, agent-sdk/0.3.220)"
 	vscodeHeaders := claudeDeviceHeaders(vscodeUA)
-	vscodeHeaders.Set("X-Stainless-Package-Version", "0.112.1")
+	vscodeHeaders.Set("X-Stainless-Package-Version", "0.127.0")
 	vscodeHeaders.Set("X-Stainless-Runtime-Version", "v26.3.0")
 	vscodeProfile, errVSCode := ResolveClaudeDeviceProfileRequired(context.Background(), auth, "api-key", vscodeHeaders, nil)
 	if errVSCode != nil {
@@ -403,7 +403,7 @@ func TestResolveClaudeDeviceProfileSeparatesVSCodeAgentSDKFromCLI(t *testing.T) 
 
 	sdkTSUA := "claude-cli/2.1.286 (external, sdk-ts, agent-sdk/0.3.220)"
 	sdkTSHeaders := claudeDeviceHeaders(sdkTSUA)
-	sdkTSHeaders.Set("X-Stainless-Package-Version", "0.112.1")
+	sdkTSHeaders.Set("X-Stainless-Package-Version", "0.127.0")
 	sdkTSHeaders.Set("X-Stainless-Runtime-Version", "v26.3.0")
 	sdkTSProfile, errSDKTS := ResolveClaudeDeviceProfileRequired(context.Background(), auth, "api-key", sdkTSHeaders, nil)
 	if errSDKTS != nil {

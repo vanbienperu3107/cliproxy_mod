@@ -8,6 +8,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
@@ -58,7 +59,20 @@ func (c *Client) rebalanceCommand(ctx context.Context, address string, args ...a
 	}
 	options.ReadTimeout = -1
 	options.WriteTimeout = -1
-	options.Dialer = redis.NewDialer(options)
+	dialer := redis.NewDialer(options)
+	// Read and write timeouts are disabled so a slow Home can finish a migration
+	// RPC, and go-redis does not propagate context cancellation to a read that is
+	// already blocked on a checked-out connection. Closing the client only reaps
+	// idle connections, so without an explicit deadline a hung Home would pin this
+	// lifetime past its own heartbeat expiry. Expire the connection's deadline when
+	// the caller's context ends so the blocked RPC always returns.
+	options.Dialer = func(dialCtx context.Context, network, addr string) (net.Conn, error) {
+		conn, errDial := dialer(dialCtx, network, addr)
+		if errDial != nil {
+			return nil, errDial
+		}
+		return newContextDeadlineConn(ctx, conn), nil
+	}
 	command := redis.NewClient(options)
 	stopCancel := context.AfterFunc(ctx, func() { _ = command.Close() })
 	defer func() {
@@ -72,6 +86,28 @@ func (c *Client) rebalanceCommand(ctx context.Context, address string, args ...a
 		return "", fmt.Errorf("Home rebalance %v: %w", args[0], errCommand)
 	}
 	return raw, nil
+}
+
+// contextDeadlineConn expires its connection deadline when the owning context ends,
+// unblocking reads and writes that have no timeout of their own.
+type contextDeadlineConn struct {
+	net.Conn
+	stop func() bool
+}
+
+func newContextDeadlineConn(ctx context.Context, conn net.Conn) net.Conn {
+	wrapped := &contextDeadlineConn{Conn: conn}
+	wrapped.stop = context.AfterFunc(ctx, func() {
+		_ = conn.SetDeadline(time.Now())
+	})
+	return wrapped
+}
+
+func (c *contextDeadlineConn) Close() error {
+	if c.stop != nil {
+		c.stop()
+	}
+	return c.Conn.Close()
 }
 
 func (c *Client) syncClusterBalance(ctx context.Context) error {

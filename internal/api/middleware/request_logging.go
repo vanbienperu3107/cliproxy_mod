@@ -5,6 +5,7 @@ package middleware
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -60,6 +61,11 @@ func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 		// Capture request information
 		requestInfo, err := captureRequestInfo(c, captureBody, captureLimit)
 		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"error": err.Error()})
+				return
+			}
 			// Log error but continue processing
 			// In a real implementation, you might want to use a proper logger here
 			c.Next()
