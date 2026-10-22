@@ -19,6 +19,9 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	}
 
 	// Simple scalars
+	if oldCfg.Client.Codex.EnableApplyPatch != newCfg.Client.Codex.EnableApplyPatch {
+		changes = append(changes, fmt.Sprintf("client.codex.enable-apply-patch: %t -> %t", oldCfg.Client.Codex.EnableApplyPatch, newCfg.Client.Codex.EnableApplyPatch))
+	}
 	if oldCfg.Port != newCfg.Port {
 		changes = append(changes, fmt.Sprintf("port: %d -> %d", oldCfg.Port, newCfg.Port))
 	}
@@ -146,11 +149,23 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if strings.TrimSpace(oldCfg.Codex.StreamBootstrapTimeout) != strings.TrimSpace(newCfg.Codex.StreamBootstrapTimeout) {
 		changes = append(changes, fmt.Sprintf("codex.stream-bootstrap-timeout: %s -> %s", strings.TrimSpace(oldCfg.Codex.StreamBootstrapTimeout), strings.TrimSpace(newCfg.Codex.StreamBootstrapTimeout)))
 	}
-	if oldCfg.Codex.OptimizeMultiAgentV2 != newCfg.Codex.OptimizeMultiAgentV2 {
-		changes = append(changes, fmt.Sprintf("codex.optimize-multi-agent-v2: %t -> %t", oldCfg.Codex.OptimizeMultiAgentV2, newCfg.Codex.OptimizeMultiAgentV2))
+	if oldCfg.Client.Codex.OptimizeMultiAgentV2 != newCfg.Client.Codex.OptimizeMultiAgentV2 {
+		changes = append(changes, fmt.Sprintf("client.codex.optimize-multi-agent-v2: %t -> %t", oldCfg.Client.Codex.OptimizeMultiAgentV2, newCfg.Client.Codex.OptimizeMultiAgentV2))
+	}
+	if oldCfg.Client.Codex.WebSearchResultCache.Enabled != newCfg.Client.Codex.WebSearchResultCache.Enabled {
+		changes = append(changes, fmt.Sprintf("client.codex.web-search-result-cache.enabled: %t -> %t", oldCfg.Client.Codex.WebSearchResultCache.Enabled, newCfg.Client.Codex.WebSearchResultCache.Enabled))
+	}
+	if strings.TrimSpace(oldCfg.Client.Codex.WebSearchResultCache.TTL) != strings.TrimSpace(newCfg.Client.Codex.WebSearchResultCache.TTL) {
+		changes = append(changes, fmt.Sprintf("client.codex.web-search-result-cache.ttl: %s -> %s", strings.TrimSpace(oldCfg.Client.Codex.WebSearchResultCache.TTL), strings.TrimSpace(newCfg.Client.Codex.WebSearchResultCache.TTL)))
+	}
+	if oldCfg.Client.Codex.WebSearchResultCache.Limit != newCfg.Client.Codex.WebSearchResultCache.Limit {
+		changes = append(changes, fmt.Sprintf("client.codex.web-search-result-cache.limit: %d -> %d", oldCfg.Client.Codex.WebSearchResultCache.Limit, newCfg.Client.Codex.WebSearchResultCache.Limit))
 	}
 	if oldCfg.Codex.OrphanDelegationCompatibility != newCfg.Codex.OrphanDelegationCompatibility {
 		changes = append(changes, fmt.Sprintf("codex.orphan-delegation-compatibility: %t -> %t", oldCfg.Codex.OrphanDelegationCompatibility, newCfg.Codex.OrphanDelegationCompatibility))
+	}
+	if oldCfg.Claude.ToolSearch != newCfg.Claude.ToolSearch {
+		changes = append(changes, fmt.Sprintf("claude.tool-search: %t -> %t", oldCfg.Claude.ToolSearch, newCfg.Claude.ToolSearch))
 	}
 	if oldCfg.XAI.InjectXSearch != newCfg.XAI.InjectXSearch {
 		changes = append(changes, fmt.Sprintf("xai.inject-x-search: %t -> %t", oldCfg.XAI.InjectXSearch, newCfg.XAI.InjectXSearch))
@@ -298,6 +313,9 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 			}
 			if o.RebuildMidSystemMessage != n.RebuildMidSystemMessage {
 				changes = append(changes, fmt.Sprintf("claude[%d].rebuild-mid-system-message: %t -> %t", i, o.RebuildMidSystemMessage, n.RebuildMidSystemMessage))
+			}
+			if o.NativeToolSearch != n.NativeToolSearch {
+				changes = append(changes, fmt.Sprintf("claude[%d].native-tool-search: %t -> %t", i, o.NativeToolSearch, n.NativeToolSearch))
 			}
 			if strings.TrimSpace(o.FingerprintProfile) != strings.TrimSpace(n.FingerprintProfile) {
 				changes = append(changes, fmt.Sprintf("claude[%d].fingerprint-profile: %s -> %s", i, strings.TrimSpace(o.FingerprintProfile), strings.TrimSpace(n.FingerprintProfile)))
@@ -513,6 +531,10 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 				changes = append(changes, fmt.Sprintf("vertex[%d].prefix: %s -> %s", i, strings.TrimSpace(o.Prefix), strings.TrimSpace(n.Prefix)))
 			}
 			changes = appendOptionalBoolChange(changes, fmt.Sprintf("vertex[%d].disable-cooling", i), o.DisableCooling, n.DisableCooling)
+			changes = appendOptionalBoolChange(changes, fmt.Sprintf("vertex[%d].openapi", i), o.OpenAPI, n.OpenAPI)
+			if strings.TrimSpace(o.OpenAPILocation) != strings.TrimSpace(n.OpenAPILocation) {
+				changes = append(changes, fmt.Sprintf("vertex[%d].openapi-location: %s -> %s", i, strings.TrimSpace(o.OpenAPILocation), strings.TrimSpace(n.OpenAPILocation)))
+			}
 			if strings.TrimSpace(o.APIKey) != strings.TrimSpace(n.APIKey) {
 				changes = append(changes, fmt.Sprintf("vertex[%d].api-key: updated", i))
 			}

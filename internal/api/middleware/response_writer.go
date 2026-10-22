@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/httpwire"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
 	log "github.com/sirupsen/logrus"
@@ -128,6 +129,11 @@ func (w *ResponseWriterWrapper) appendBufferedBody(data []byte) {
 		return
 	}
 	w.body.Write(data)
+}
+
+// FlushError forwards transport errors without bypassing inner middleware.
+func (w *ResponseWriterWrapper) FlushError() error {
+	return httpwire.FlushResponse(w.ResponseWriter)
 }
 
 func (w *ResponseWriterWrapper) shouldBufferResponseBody() bool {

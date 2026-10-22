@@ -44,8 +44,21 @@ func (h *Host) RegisterExecutors(manager executorManager, modelRegistry modelPro
 	claimedModels := make(map[string]struct{})
 	claimedProviders := make(map[string]string)
 	for _, registration := range registrations {
-		if !registration.hasExecutor {
-			appendModelsForProvider(providerModels, registration.provider, registration.models)
+		if registration.hasExecutor {
+			continue
+		}
+		appendModelsForProvider(providerModels, registration.provider, registration.models)
+		// Reserve native catalog models before plugin arbitration, independently of
+		// credential publication or exclusions. This preserves native priority without
+		// publishing availability, which remains credential-bound.
+		if h.providerHasNativeExecutor(manager, registration.provider) {
+			for _, model := range registration.models {
+				if model != nil {
+					if modelID := strings.TrimSpace(model.ID); modelID != "" {
+						claimedModels[modelID] = struct{}{}
+					}
+				}
+			}
 		}
 	}
 	for _, record := range records {
@@ -165,6 +178,7 @@ func (h *Host) commitExecutorState(snap *Snapshot, manager executorManager, mode
 		}
 	}
 	h.executorModelClientIDs = nextModelClients
+	h.mu.Unlock()
 
 	for _, registration := range registrations {
 		if registration.adapter == nil || registration.provider == "" {
@@ -179,7 +193,6 @@ func (h *Host) commitExecutorState(snap *Snapshot, manager executorManager, mode
 		}
 		manager.UnregisterExecutor(provider)
 	}
-	h.mu.Unlock()
 
 	if modelRegistry == nil {
 		return
@@ -411,7 +424,16 @@ func (a *executorAdapter) prepareExecutorCall(req coreexecutor.Request, opts cor
 	nativeReq := req
 	nativeOpts := opts
 	if inputRequested != "" && inputRequested != inputFormat {
-		nativeReq.Payload = sdktranslator.TranslateRequest(inputRequested, inputFormat, req.Model, req.Payload, opts.Stream)
+		translated := sdktranslator.TranslateRequestEnvelope(context.Background(), inputRequested, inputFormat, sdktranslator.RequestEnvelope{
+			Format: inputRequested,
+			Model:  req.Model,
+			Stream: opts.Stream,
+			Body:   req.Payload,
+		})
+		if translated.Err != nil {
+			return preparedExecutorCall{}, translated.Err
+		}
+		nativeReq.Payload = translated.Body
 	}
 	nativeReq.Format = outputFormat
 	nativeOpts.SourceFormat = inputFormat
@@ -785,7 +807,6 @@ func (a *executorAdapter) observeAndTranslateExecutorStream(ctx context.Context,
 	var streamErr error
 	var publishOnce sync.Once
 	var lineBuffer []byte
-	const maxLineBufferSize = 64 * 1024
 
 	publishResult := func() {
 		publishOnce.Do(func() {
@@ -856,10 +877,6 @@ func (a *executorAdapter) observeAndTranslateExecutorStream(ctx context.Context,
 							helps.ObservePluginExecutorStreamUsage(prepared.outputFormat.String(), lineBuffer, &streamUsage)
 							lineBuffer = nil
 						}
-					}
-					if len(lineBuffer) > maxLineBufferSize {
-						helps.ObservePluginExecutorStreamUsage(prepared.outputFormat.String(), lineBuffer, &streamUsage)
-						lineBuffer = nil
 					}
 				}
 
