@@ -21,10 +21,18 @@ import (
 
 // responsesLocalInterrupt cancels an in-flight HTTP turn. A websocket upstream
 // does not use it; that interrupt is written to the existing socket instead.
+//
+// The window is armed for the duration of a turn and is narrowed to the
+// in-flight response as soon as its ID is known: an interrupt naming any other
+// response, or arriving after the turn reached a terminal event, is not a local
+// cancellation and must be reported to the client as an error instead of being
+// acknowledged with a synthetic response.incomplete.
 type responsesLocalInterrupt struct {
-	mu     sync.Mutex
-	active bool
-	frames chan []byte
+	mu            sync.Mutex
+	active        bool
+	responseID    string
+	hasResponseID bool
+	frames        chan []byte
 }
 
 func newResponsesLocalInterrupt() *responsesLocalInterrupt {
@@ -37,6 +45,8 @@ func (s *responsesLocalInterrupt) begin() {
 	}
 	s.mu.Lock()
 	s.active = true
+	s.responseID = ""
+	s.hasResponseID = false
 	s.mu.Unlock()
 }
 
@@ -46,6 +56,42 @@ func (s *responsesLocalInterrupt) end() {
 	}
 	s.mu.Lock()
 	s.active = false
+	s.responseID = ""
+	s.hasResponseID = false
+	select {
+	case <-s.frames:
+	default:
+	}
+	s.mu.Unlock()
+}
+
+// beginResponse re-arms the window for a new turn and binds it to that
+// response's ID, so the next turn on the same socket is interruptible again.
+func (s *responsesLocalInterrupt) beginResponse(responseID string) {
+	if s == nil {
+		return
+	}
+	responseID = strings.TrimSpace(responseID)
+	s.mu.Lock()
+	s.active = true
+	s.responseID = responseID
+	s.hasResponseID = responseID != ""
+	select {
+	case <-s.frames:
+	default:
+	}
+	s.mu.Unlock()
+}
+
+// completeResponse closes the window once a turn reached a terminal event.
+func (s *responsesLocalInterrupt) completeResponse() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.active = false
+	s.responseID = ""
+	s.hasResponseID = false
 	select {
 	case <-s.frames:
 	default:
@@ -60,6 +106,11 @@ func (s *responsesLocalInterrupt) deliver(payload []byte) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.active {
+		return false
+	}
+	// Before response.created the upstream ID is unknown to the client, so any
+	// interrupt cancels the turn in flight. Afterwards it must name that turn.
+	if s.hasResponseID && strings.TrimSpace(gjson.GetBytes(payload, "response_id").String()) != s.responseID {
 		return false
 	}
 	select {

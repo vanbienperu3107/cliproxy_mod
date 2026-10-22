@@ -170,6 +170,9 @@ func (h *OpenAIResponsesAPIHandler) forwardResponsesWebsocket(
 					outputItemsByIndex = make(map[int64][]byte)
 					outputItemsFallback = nil
 					pendingToolCallIDs = make(map[string]struct{})
+					// Bind local cancellation to this turn so an interrupt naming
+					// another response is rejected instead of acknowledged.
+					opts.localInterrupt.beginResponse(gjson.GetBytes(payloads[i], "response.id").String())
 				}
 				collectResponsesWebsocketOutputItem(payloads[i], outputItemsByIndex, &outputItemsFallback)
 				if isResponsesWebsocketCompletionEvent(eventType) && (opts.preserveCompletionOutput == nil || !opts.preserveCompletionOutput()) {
@@ -202,6 +205,9 @@ func (h *OpenAIResponsesAPIHandler) forwardResponsesWebsocket(
 					completed = true
 					completedOutput = responseCompletedOutputFromPayload(payloads[i], outputItemsByIndex, outputItemsFallback)
 					completedResponseID = responseCompletedIDFromPayload(payloads[i])
+					// The turn is terminal: a later interrupt is no longer a local
+					// cancellation of anything still running.
+					opts.localInterrupt.completeResponse()
 				}
 				markAPIResponseTimestamp(c)
 				if payloadErrMsg != nil {
@@ -270,11 +276,13 @@ func completeResponsesWebsocketLocalInterrupt(
 		cancel(errSet)
 		return output, responseID, sortedStringSet(pendingToolCallIDs), nil, errSet
 	}
+	// Cancel the upstream turn before telling the client it was interrupted:
+	// the client is free to act on response.incomplete immediately, so the
+	// cancellation must already be in flight when that frame is written.
+	cancel(context.Canceled)
 	if errWrite := writeResponsesWebsocketPayload(writer, wsTimelineLog, incomplete, time.Now()); errWrite != nil {
-		cancel(errWrite)
 		return output, responseID, sortedStringSet(pendingToolCallIDs), nil, errWrite
 	}
-	cancel(context.Canceled)
 	return output, responseID, sortedStringSet(pendingToolCallIDs), nil, nil
 }
 
