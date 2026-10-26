@@ -39,3 +39,6 @@ bin
 .bmad
 _bmad
 _bmad-output
+
+# Plugin build output (baked into the image instead)
+examples/plugin/deepseek-web/go/bin
